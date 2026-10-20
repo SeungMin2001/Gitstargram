@@ -1,11 +1,59 @@
 # Gitstargram 개발 현황 및 AI 인계 문서
 
-마지막 갱신: 2026-10-19 22:54 (Asia/Seoul)
+마지막 갱신: 2026-10-20 (Asia/Seoul)
 
 > **중요 (인계 원칙):**
 > 1. 이 문서는 **코드 구현 상태**와 **실측·통합 검증 완료 상태**를 엄격히 분리하여 기록한다.
 > 2. 다음 작업자(또는 AI 에이전트)는 반드시 루트의 `PROJECT_SPEC.md`(원본 마스터 명세 1,727줄)와 이 문서를 먼저 읽고 이어서 진행한다.
-> 3. **현재 모든 실행 프로세스(Docker Compose 컨테이너, 호스트 vLLM Metal 서버 `:8001`, 호스트 MPS 임베딩 서버 `:8002`)는 사용자 요청에 따라 안전하게 종료(`down`/종료)된 상태**이다. 단, PostgreSQL/Redis 볼륨과 다운로드된 Hugging Face 모델 캐시(`Qwen/Qwen3.5-4B`, `Qwen/Qwen3-Embedding-0.6B`), 가상환경(`/Users/shin/.venv-vllm-metal`)은 디스크에 그대로 보존되어 있어 즉시 재기동할 수 있다.
+> 3. **현재 작업 재개에 따라 Docker Desktop과 Compose 서비스를 재기동했다.** 아래 3차 세션 기록이 이전의 프로세스 종료 기록보다 우선한다. 호스트 AI 서버는 이번 작업에서 재기동하지 않았다. 기존 모델 캐시와 가상환경은 삭제하거나 변경하지 않았다.
+
+## 현재 인계: 3차 세션 (2026-10-20)
+
+### 시작점과 이번 작업의 선택 이유
+
+- 시작 커밋: `4365dd6` (`10/20`), `main` 브랜치. 시작 시 작업 트리는 깨끗했다. 기존 명세, 진행 문서, API/모델/마이그레이션/CI/프론트엔드를 확인하고 이어서 작업했다.
+- 사용자가 이번 대화에서 **GitHub App 자격증명은 아직 설정하지 않았다**고 확인했다. 실제 로그인, GitHub 사용자 데이터 동기화, 실계정 AI README 처리, 두 실제 계정 간 DM은 계속 미검증이다. 테스트용 사용자를 실제 GitHub 사용자라고 간주하지 않는다.
+- 코드에서 DM WebSocket Origin 검증 누락, 차단 후 메시지 조회 허용, 연결 후 세션 폐기 미반영, 전송 키 재사용 시 다른 대화방 메시지 반환 문제를 확인했다. 실계정 설정과 독립적으로 수정할 수 있는 권한 경계를 이번 작업 범위로 정했다.
+
+### 변경 파일과 구현 내용
+
+| 파일 | 이번 변경 |
+|---|---|
+| `apps/api/app/dm.py` | WebSocket 접속 시 `FRONTEND_URL`과 Origin을 정확히 비교하고 잘못된 출처를 4403으로 거절. 세션 없거나 폐기되면 4401. 연결 중에는 최대 30초 간격과 각 메시지 수신 반복에서 세션을 재검사하며, **서버가 이벤트를 전달하기 직전에도** DB 세션의 사용자·해시·만료를 확인해 로그아웃한 연결에 새 DM을 보내지 않는다. 잘못된 JSON·객체가 아닌 JSON·4,096자를 넘는 제어 메시지는 4400으로 종료. |
+| `apps/api/app/dm.py` | 대화 참여 검증에 양방향 차단 검사를 통합해 조회와 전송 모두 403 처리. 공백뿐인 메시지는 Pydantic 검증에서 거절. 같은 전송 키의 정상 재시도는 원래 메시지를 반환하고, 대화방·본문·공유 대상이 다르면 409. 동시 재시도는 DB 고유 제약과 `INSERT ... ON CONFLICT DO NOTHING RETURNING`으로 처리하여 중복 알림/전송을 방지하도록 구현. |
+| `apps/api/tests/conftest.py` | 외부 트랜잭션과 SAVEPOINT를 사용하는 `isolated_db` 추가. 서비스가 내부에서 `commit()`해도 테스트 종료 시 전체 데이터 롤백. 각 테스트용 엔진도 dispose. |
+| `apps/api/tests/test_recommend.py` | 기존 DB 테스트의 고정 ID 선삭제와 실제 커밋 후 수동 삭제를 제거하고 격리 fixture 적용. 기존 데이터와 ID가 충돌하면 실패하며 기존 데이터를 삭제하지 않는다. |
+| `apps/api/tests/test_dm.py` | 새 회귀 테스트 7개: 외부 Origin, 쿠키 없는 접속, 공백 본문, 폐기된 WebSocket 세션, 이벤트 전달 전 세션 폐기, 비참여자 및 양방향 차단, 정상 재시도/다른 대화방·본문의 전송 키 재사용. DB 테스트의 사용자는 합성 fixture이고 외부 트랜잭션에서 롤백한다. |
+| `AGENTS.md` | 다음 AI가 명세와 이 문서를 먼저 읽고, 변경 이유·명령·결과·미검증·다음 작업을 지속 기록하도록 루트 작업 지침 추가. |
+
+### 이번 검증 결과
+
+- `docker compose up -d --build`: 성공. PostgreSQL/Redis/API healthy, web/worker 기동, 마이그레이션 성공. 처음에는 Docker Desktop이 꺼져 있어 실행한 후 진행했다.
+- 최신 호스트 소스를 읽기 전용 마운트한 API 테스트 컨테이너:
+  ```bash
+  docker compose run --rm --no-deps \
+    -v /Users/shin/Documents/2026-2/Gitstargram/apps/api:/app:ro \
+    api pytest -q -p no:cacheprovider
+  ```
+  **13 passed**, 0.33초. Starlette TestClient의 AnyIO `BlockingPortal` alias deprecation 경고 1개. 경고를 숨기거나 의존성을 임의로 업그레이드하지 않았다.
+- `docker compose exec -T web npm run typecheck`: 성공.
+- 수정 후 API/worker/migrate 이미지를 다시 빌드해 실행에 반영했다. 최종 `docker compose exec -T api pytest -q`: **13 passed, 1 warning in 0.28s**.
+- 최종 연결 확인: 컨테이너 내부에서 API `/health` HTTP 200, web `/` HTTP 200. 호스트 `:8001` 생성형·`:8002` 임베딩 엔드포인트는 연결 불가(현재 꺼짐). DB의 이번 합성 테스트 사용자 수는 **0**으로 확인했다. 개발용 DB/Redis/API/worker/web은 실행 상태로 남겼다.
+- `git diff --check`: 통과. 이번 작업은 커밋·push하지 않았다.
+- 의미와 한계: PostgreSQL에서 대화 참여/차단/저장/재시도 경로를 호출했다. WebSocket Origin/폐기 테스트는 실제 ASGI WebSocket 처리기를 호출하되, 폐기 상태의 DB 조회는 단위 테스트 대역을 사용했다. **실제 로그인한 두 브라우저의 WebSocket E2E나 동시 HTTP 요청 경합 시험은 수행하지 않았다.**
+- 이번 작업에서 로컬 AI 추론과 이전 세션의 성능 수치는 재측정하지 않았다. 아래 2차 세션 수치는 이전 기록으로 유지하며 현재 성능으로 보증하지 않는다.
+
+### 다음 작업 순서와 아직 남은 결함
+
+1. GitHub App 설정을 사용자가 로컬 `.env`에 완료하면 아래 Step 3 순서로 로그인부터 실제 GitHub 데이터와 DB·화면의 일치를 검증한다. Secret을 채팅이나 로그에 출력하지 않는다.
+2. 두 실제 GitHub 계정으로 DM 연결·수신·로그아웃 후 이벤트 차단·사용자 차단·읽음·재연결을 확인한다. 정상 재시도의 동시 HTTP 요청 경합도 별도로 검증한다.
+3. **DM 조회 GET이 읽음 상태를 변경하는 기존 설계가 남아 있다.** 조회와 명시적 읽음 갱신 API를 분리하고 Origin 검증을 적용하는 작업이 필요하다. 프론트엔드도 새 API를 호출해야 한다.
+4. **1:1 대화 생성은 사용자 쌍의 DB 고유 제약이 없어 동시 생성 시 중복 대화방이 생길 수 있다.** 마이그레이션과 원자적 생성이 필요하다. 기존 데이터의 중복 처리 정책을 먼저 정해야 한다.
+5. 기존 `0001`/`0002` 마이그레이션은 현재 `Base.metadata.create_all()`에 의존한다. 모델 변경에 따라 과거 마이그레이션 동작이 달라지고 `0002` downgrade가 테이블을 복구하지 않는다. 공개 배포 전에 명시적인 불변 스키마 마이그레이션으로 수정하고 빈 DB upgrade/downgrade를 시험해야 한다.
+6. 게시물·댓글·북마크·공유 게시물 API의 차단 정책을 전체 점검한다. 현재 DM 검증만으로 모든 SNS 접근 경계가 검증됐다고 말하지 않는다. 개인화 off의 로그 수집 정책·보존기간·삭제도 별도 점검이 필요하다.
+7. 이후 GitHub ETag/작업 큐 복구, Playwright E2E, 모델 비교 벤치마크, 의존성/보안 검사, S3·운영 배포를 진행한다. 라이선스와 유료 AWS 리소스는 소유자 결정이 필요하다.
+
+이번 변경은 로컬 작업 트리에 있으며 원격으로 push하지 않았다. 작업 종료 시 `git status --short`와 아래 서비스 상태를 다시 확인한다.
 
 ---
 
@@ -45,7 +93,7 @@
 | 항목 | 상태 / 경로 |
 |---|---|
 | 하드웨어 / OS | Apple M4 (10-core), RAM 24 GB, macOS 26.6.2 (arm64) |
-| Docker / Compose | Engine 29.8.2, Compose v5.6.0 (현재 `docker compose down`으로 컨테이너 종료됨, DB/Redis 볼륨은 보존됨) |
+| Docker / Compose | Engine 29.8.2, Compose v5.6.0 (3차 세션에서 재기동, DB/Redis 볼륨 보존) |
 | 로컬 AI 가상환경 | `/Users/shin/.venv-vllm-metal` (Python 3.12.15, `vllm 0.31.0+cpu`, `vllm-metal 0.31.0`, `torch 2.13.0`, `transformers 5.17.0`) |
 | 다운로드된 모델 캐시 | `/Users/shin/.cache/huggingface/hub` 내 `models--Qwen--Qwen3.5-4B` 및 `models--Qwen--Qwen3-Embedding-0.6B` 다운로드 완료 |
 | 환경 변수 (`.env`) | `POSTGRES_*`, `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `AI_BASE_URL`, `EMBEDDING_BASE_URL`, `EMBEDDING_DIMENSIONS=1024` 설정 완료. **`GITHUB_CLIENT_ID`와 `GITHUB_CLIENT_SECRET`만 비어 있음.** |
@@ -131,7 +179,7 @@
 
 ### Step 1. 서비스 및 로컬 AI 서버 재기동
 
-현재 모든 프로세스가 꺼져 있으므로 작업 재개 시 아래 순서로 기동한다:
+중지된 서비스를 재개할 때 아래 순서를 사용한다. 현재 실행 상태는 상단의 최신 세션 기록을 우선 확인한다:
 
 ```bash
 # 1) 호스트 터미널 1: 생성형 AI 서버 (Qwen3.5-4B, 포트 8001)

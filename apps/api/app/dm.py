@@ -1,11 +1,15 @@
+import asyncio
+import json
 from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert
 
+from .config import settings
 from .database import SessionLocal, session_scope
 from .models import (
     AuthSession,
@@ -34,6 +38,14 @@ class SendMessageInput(BaseModel):
     shared_post_id: int | None = None
     client_message_id: str | None = Field(default=None, max_length=64)
 
+    @field_validator("body")
+    @classmethod
+    def nonempty_body(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Message must contain non-whitespace text")
+        return value
+
 
 class ConnectionHub:
     def __init__(self) -> None:
@@ -50,6 +62,17 @@ class ConnectionHub:
         dead: list[WebSocket] = []
         for ws in list(self._connections.get(user_id, set())):
             try:
+                token = ws.cookies.get(COOKIE_NAME)
+                async with SessionLocal() as db:
+                    active_session = await db.scalar(select(AuthSession.id).where(
+                        AuthSession.user_id == user_id,
+                        AuthSession.token_hash == token_hash(token or ""),
+                        AuthSession.expires_at > datetime.now(timezone.utc),
+                    ))
+                if active_session is None:
+                    await ws.close(code=4401)
+                    dead.append(ws)
+                    continue
                 await ws.send_json(event)
             except Exception:
                 dead.append(ws)
@@ -104,6 +127,9 @@ async def verify_member(db: AsyncSession, conversation_id: int, user_id: int) ->
     me_member = next((m for m in members if m.user_id == user_id), None)
     if not me_member:
         raise HTTPException(403, "Not a participant of this conversation")
+    blocked = await blocked_user_ids(db, user_id)
+    if any(member.user_id in blocked for member in members if member.user_id != user_id):
+        raise HTTPException(403, "Messaging unavailable due to block settings")
     return me_member, [m.user_id for m in members]
 
 
@@ -246,9 +272,6 @@ async def send_message(
     db: AsyncSession = Depends(session_scope),
 ):
     me_member, member_ids = await verify_member(db, conversation_id, user.id)
-    blocked = await blocked_user_ids(db, user.id)
-    if any(uid in blocked for uid in member_ids if uid != user.id):
-        raise HTTPException(403, "Messaging unavailable due to block settings")
     if payload.client_message_id:
         dup = await db.scalar(
             select(Message).where(
@@ -257,6 +280,10 @@ async def send_message(
             )
         )
         if dup:
+            if (dup.conversation_id != conversation_id or dup.body != payload.body.strip()
+                    or dup.shared_repository_id != payload.shared_repository_id
+                    or dup.shared_post_id != payload.shared_post_id):
+                raise HTTPException(409, "Message key already used for another message")
             return await serialize_message(db, dup)
     if payload.shared_repository_id is not None:
         repo = await db.get(Repository, payload.shared_repository_id)
@@ -266,7 +293,7 @@ async def send_message(
         post = await db.get(Post, payload.shared_post_id)
         if not post:
             raise HTTPException(404, "Shared post not found")
-    msg = Message(
+    values = dict(
         conversation_id=conversation_id,
         sender_id=user.id,
         body=payload.body.strip(),
@@ -274,8 +301,21 @@ async def send_message(
         shared_post_id=payload.shared_post_id,
         client_message_id=payload.client_message_id,
     )
-    db.add(msg)
-    await db.flush()
+    statement = insert(Message).values(**values).on_conflict_do_nothing(
+        index_elements=[Message.sender_id, Message.client_message_id]
+    ).returning(Message)
+    msg = await db.scalar(statement)
+    if msg is None:
+        # A concurrent retry may have inserted the key after the initial lookup.
+        dup = await db.scalar(select(Message).where(
+            Message.sender_id == user.id, Message.client_message_id == payload.client_message_id
+        ))
+        if (dup is None or dup.conversation_id != conversation_id
+                or dup.body != payload.body.strip()
+                or dup.shared_repository_id != payload.shared_repository_id
+                or dup.shared_post_id != payload.shared_post_id):
+            raise HTTPException(409, "Message key already used for another message")
+        return await serialize_message(db, dup)
     me_member.last_read_message_id = msg.id
     conv = await db.get(Conversation, conversation_id)
     if conv:
@@ -295,6 +335,9 @@ async def send_message(
 
 @router.websocket("/ws")
 async def dm_websocket(websocket: WebSocket):
+    if websocket.headers.get("origin") != settings().frontend_url:
+        await websocket.close(code=4403)
+        return
     token = websocket.cookies.get(COOKIE_NAME)
     if not token:
         await websocket.close(code=4401)
@@ -314,7 +357,31 @@ async def dm_websocket(websocket: WebSocket):
     await hub.connect(user.id, websocket)
     try:
         while True:
-            data = await websocket.receive_json()
+            # Recheck idle sockets as well: cookie deletion alone cannot revoke
+            # an already established WebSocket after logout or account deletion.
+            async with SessionLocal() as db:
+                valid_session = await db.scalar(select(AuthSession.id).where(
+                    AuthSession.token_hash == token_hash(token),
+                    AuthSession.expires_at > datetime.now(timezone.utc),
+                ))
+            if valid_session is None:
+                await websocket.close(code=4401)
+                break
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                continue
+            if len(raw) > 4096:
+                await websocket.close(code=4400)
+                break
+            try:
+                data = json.loads(raw)
+            except (ValueError, TypeError):
+                await websocket.close(code=4400)
+                break
+            if not isinstance(data, dict):
+                await websocket.close(code=4400)
+                break
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:

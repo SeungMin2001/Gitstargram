@@ -2,10 +2,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.ai import strip_thinking_blocks
-from app.database import SessionLocal
 from app.models import Follow, Post, Repository, RepositoryEmbedding, Story, User
 from app.recommend import (
     average_vector,
@@ -110,63 +109,56 @@ def test_honest_evaluation_metrics_and_thinking_strip():
 
 
 @pytest.mark.asyncio
-async def test_pgvector_and_sns_persistence_roundtrip():
-    async with SessionLocal() as db:
-        test_repo_id = 999_999_001
-        await db.execute(delete(Repository).where(Repository.id == test_repo_id))
-        await db.execute(delete(User).where(User.github_id.in_([999_999_101, 999_999_102])))
-        await db.commit()
+async def test_pgvector_and_sns_persistence_roundtrip(isolated_db):
+    db = isolated_db
+    test_repo_id = 999_999_001
 
-        u1 = User(github_id=999_999_101, login="test_dev_a", html_url="https://github.com/test_dev_a")
-        u2 = User(github_id=999_999_102, login="test_dev_b", html_url="https://github.com/test_dev_b")
-        r1 = Repository(
-            id=test_repo_id,
-            owner_github_id=999_999_101,
-            owner_login="test_dev_a",
-            name="pgvector-demo",
-            full_name="test_dev_a/pgvector-demo",
-            description="Vector search test repo",
-            html_url="https://github.com/test_dev_a/pgvector-demo",
-            language="Python",
-            topics=["pgvector", "fastapi"],
-            stars=42,
-            is_public=True,
-        )
-        db.add_all([u1, u2, r1])
-        await db.flush()
+    u1 = User(github_id=999_999_101, login="test_dev_a", html_url="https://github.com/test_dev_a")
+    u2 = User(github_id=999_999_102, login="test_dev_b", html_url="https://github.com/test_dev_b")
+    r1 = Repository(
+        id=test_repo_id,
+        owner_github_id=999_999_101,
+        owner_login="test_dev_a",
+        name="pgvector-demo",
+        full_name="test_dev_a/pgvector-demo",
+        description="Vector search test repo",
+        html_url="https://github.com/test_dev_a/pgvector-demo",
+        language="Python",
+        topics=["pgvector", "fastapi"],
+        stars=42,
+        is_public=True,
+    )
+    db.add_all([u1, u2, r1])
+    await db.flush()
 
-        vec = [0.5] + [0.0] * 1023
-        db.add(
-            RepositoryEmbedding(
-                repository_id=r1.id,
-                model_name="Qwen/Qwen3-Embedding-0.6B",
-                dimensions=1024,
-                content_hash=content_hash_for_repo(r1),
-                embedding=vec,
-            )
+    vec = [0.5] + [0.0] * 1023
+    db.add(
+        RepositoryEmbedding(
+            repository_id=r1.id,
+            model_name="Qwen/Qwen3-Embedding-0.6B",
+            dimensions=1024,
+            content_hash=content_hash_for_repo(r1),
+            embedding=vec,
         )
-        db.add(Follow(follower_id=u2.id, following_id=u1.id))
-        db.add(Post(author_id=u1.id, repository_id=r1.id, title="출시 공유", body="실제 DB 저장 검증", tags=["python"]))
-        db.add(
-            Story(
-                author_id=u1.id,
-                repository_id=r1.id,
-                kind="release",
-                title="v0.2.0",
-                summary="pgvector 연동 완료",
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-            )
+    )
+    db.add(Follow(follower_id=u2.id, following_id=u1.id))
+    db.add(Post(author_id=u1.id, repository_id=r1.id, title="출시 공유", body="실제 DB 저장 검증", tags=["python"]))
+    db.add(
+        Story(
+            author_id=u1.id,
+            repository_id=r1.id,
+            kind="release",
+            title="v0.2.0",
+            summary="pgvector 연동 완료",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
-        await db.commit()
+    )
+    await db.commit()
 
-        nearest = await db.scalar(
-            select(RepositoryEmbedding.repository_id)
-            .where(RepositoryEmbedding.repository_id == test_repo_id)
-            .order_by(RepositoryEmbedding.embedding.cosine_distance(vec))
-            .limit(1)
-        )
-        assert nearest == test_repo_id
-
-        await db.execute(delete(Repository).where(Repository.id == test_repo_id))
-        await db.execute(delete(User).where(User.id.in_([u1.id, u2.id])))
-        await db.commit()
+    nearest = await db.scalar(
+        select(RepositoryEmbedding.repository_id)
+        .where(RepositoryEmbedding.repository_id == test_repo_id)
+        .order_by(RepositoryEmbedding.embedding.cosine_distance(vec))
+        .limit(1)
+    )
+    assert nearest == test_repo_id
