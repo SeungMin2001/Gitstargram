@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: gitstargram
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: gitstargram
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gitstargram -d gitstargram"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        working-directory: apps/api
+        run: pip install -r requirements.txt
+      - name: Run migrations and tests
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://gitstargram:ci-test-password@localhost:5432/gitstargram
+          REDIS_URL: redis://localhost:6379/0
+          SESSION_SECRET: ci-only-non-production-session-secret-32chars
+        run: |
+          alembic upgrade head
+          pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install and typecheck frontend
+        working-directory: apps/web
+        run: |
+          npm install
+          npm run typecheck
+          npm run build
