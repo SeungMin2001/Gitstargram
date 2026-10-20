@@ -52,6 +52,15 @@ def test_trending_does_not_pretend_to_use_star_growth_without_snapshots():
     assert any("stars (snapshot)" in r for r in reasons)
 
 
+def test_recommendation_explanations_only_claim_signals_used_by_ranker():
+    item = repo("Python", ["rag"], stars=100)
+    interests = interest_weights([item])
+    _, reasons = score_repository(item, interests, "trending", social_owner_logins={"owner"})
+    assert reasons == ["github-popularity", "push-recency"]
+    _, reasons = score_repository(item, interests, "for-you", social_owner_logins={"owner"})
+    assert "following-author" not in reasons  # Metadata fallback has no social weight.
+
+
 def test_github_normalization_keeps_id_and_public_visibility():
     item = {
         "id": 42,

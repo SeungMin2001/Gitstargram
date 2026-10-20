@@ -4,6 +4,8 @@ A developer social network built on real GitHub data, featuring GitHub App user 
 
 See [PROJECT_SPEC.md](PROJECT_SPEC.md) for the full specification and [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for the strict separation between implemented code, measured benchmarks on Mac mini M4 (24GB), and validations awaiting live GitHub App user credentials.
 
+Repository cards include a detail dialog with live GitHub metadata, language byte proportions, license information, README source, and recorded recommendation signals. Select one of your synchronized public projects to request an AI suggestion about using the discovered repository, with evidence links for both projects. This flow still requires validation with GitHub App sign-in and a running local model. The design decisions drawn from the owner's earlier GitTeol project are recorded in [the reference review](docs/GITTEOL_REVIEW.md). Start and stop commands are in [RUNBOOK.md](RUNBOOK.md).
+
 ## Architecture
 
 - **Frontend (`apps/web`, `:3000`)**: Next.js 15, React 19, TypeScript, responsive 3-column Explore grid, Dark/Light themes

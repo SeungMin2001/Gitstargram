@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { api, API } from "../lib/api";
+import { RepositoryDetailDialog } from "../components/RepositoryDetailDialog";
 
 type User = {
   id: number; login: string; name: string | null; avatar_url: string | null; bio: string | null;
@@ -53,16 +53,6 @@ type Tab = "home" | "explore" | "profile" | "dm";
 type ExploreMode = "for-you" | "trending" | "following";
 type ExploreCategory = "all" | "ai-ml" | "frontend" | "backend" | "devops-tools";
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, { credentials: "include", cache: "no-store", ...init });
-  if (!response.ok) {
-    let message = `요청 실패 (${response.status})`;
-    try { const body = await response.json(); message = body.detail ?? message; } catch { /* keep status */ }
-    throw new Error(message);
-  }
-  return response.status === 204 ? undefined as T : response.json();
-}
-
 function Icon({ name, size = 22 }: { name: string; size?: number }) {
   const shared = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   const paths: Record<string, React.ReactNode> = {
@@ -85,10 +75,11 @@ function relativeDate(value: string | null) {
 }
 
 function RepoCard({
-  repo, compact = false, onOpen, onDismiss, onSummary, onTranslate, onBookmark,
+  repo, compact = false, onOpen, onDismiss, onSummary, onTranslate, onBookmark, onDetail,
 }: {
   repo: Repo; compact?: boolean; onOpen?: (repo: Repo) => void; onDismiss?: (repo: Repo) => void;
   onSummary?: (repo: Repo) => void; onTranslate?: (repo: Repo) => void; onBookmark?: (repo: Repo) => void;
+  onDetail?: (repo: Repo) => void;
 }) {
   const hue = [...repo.full_name].reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
   return <article className={`repo-card ${compact ? "compact" : ""}`}>
@@ -102,12 +93,13 @@ function RepoCard({
         <h3>{repo.name}</h3>
         <p>{repo.description || "GitHub에 설명이 등록되지 않았습니다."}</p>
         <div className="repo-topics">
-          {(repo.reasons && repo.reasons.length > 0 ? repo.reasons : repo.topics.slice(0, 3)).map(topic => <span key={topic}>#{topic}</span>)}
+          {repo.topics.slice(0, 3).map(topic => <span key={topic}>#{topic}</span>)}
         </div>
         <div className="repo-footer"><span><Icon name="star" size={15} /> GitHub Star {repo.stars.toLocaleString()}</span><span>{relativeDate(repo.fetched_at)} 수집</span></div>
       </div>
     </a>
     <div className="card-actions">
+      {onDetail && <button className="summary-btn" type="button" onClick={() => onDetail(repo)}>상세 보기</button>}
       {onSummary && <button className="summary-btn" type="button" onClick={() => onSummary(repo)}>AI 요약</button>}
       {onTranslate && <button className="summary-btn" type="button" onClick={() => onTranslate(repo)}>README 번역</button>}
       {onBookmark && <button className="summary-btn" type="button" onClick={() => onBookmark(repo)}>{repo.bookmarked ? "북마크됨" : "북마크"}</button>}
@@ -135,6 +127,7 @@ export default function HomePage() {
   const [hiddenIds, setHiddenIds] = useState<number[]>([]);
   const [aiModal, setAiModal] = useState<{ title: string; subtitle: string; text: string; source: string; truncated: boolean; latencyMs?: number } | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [detailRepo, setDetailRepo] = useState<Repo | null>(null);
 
   // Social & Feed state
   const [feedMode, setFeedMode] = useState<"following" | "recommended">("following");
@@ -505,10 +498,10 @@ export default function HomePage() {
         </article>) : <div className="empty-state"><Icon name="code" size={32} /><h3>아직 작성된 SNS 게시물이 없어요</h3><p>위의 작성 창에서 첫 개발 업데이트를 공유하거나 다른 개발자를 팔로우해보세요.</p></div>}
 
         <div className="section-title spaced"><div><span className="section-index">02 /</span><h2>내 GitHub 공개 프로젝트</h2></div><span className="count-label">{owned.length} repositories</span></div>
-        {owned.length ? <div className="home-grid">{owned.slice(0, 6).map(repo => <RepoCard key={repo.id} repo={repo} onOpen={item => track(item, "click")} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} />)}</div> : <div className="empty-state"><Icon name="code" size={32} /><h3>표시할 공개 저장소가 없어요</h3><p>동기화가 진행 중이거나 GitHub에 공개 저장소가 없을 수 있습니다.</p></div>}
+        {owned.length ? <div className="home-grid">{owned.slice(0, 6).map(repo => <RepoCard key={repo.id} repo={repo} onOpen={item => track(item, "click")} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} onDetail={setDetailRepo} />)}</div> : <div className="empty-state"><Icon name="code" size={32} /><h3>표시할 공개 저장소가 없어요</h3><p>동기화가 진행 중이거나 GitHub에 공개 저장소가 없을 수 있습니다.</p></div>}
 
         <div className="section-title spaced"><div><span className="section-index">03 /</span><h2>당신을 위한 발견</h2></div><button className="link-button" onClick={() => setTab("explore")}>Explore 보기 <Icon name="arrow" size={16} /></button></div>
-        {explore.length ? <div className="home-grid">{explore.slice(0, 3).map(repo => <RepoCard key={repo.id} repo={repo} compact onOpen={item => track(item, "click")} onDismiss={dismiss} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} />)}</div> : <div className="empty-state"><Icon name="explore" size={32} /><h3>추천 후보를 모으고 있어요</h3><p>GitHub Star와 공개 저장소가 동기화되면 실제 프로젝트가 표시됩니다.</p></div>}
+        {explore.length ? <div className="home-grid">{explore.slice(0, 3).map(repo => <RepoCard key={repo.id} repo={repo} compact onOpen={item => track(item, "click")} onDismiss={dismiss} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} onDetail={setDetailRepo} />)}</div> : <div className="empty-state"><Icon name="explore" size={32} /><h3>추천 후보를 모으고 있어요</h3><p>GitHub Star와 공개 저장소가 동기화되면 실제 프로젝트가 표시됩니다.</p></div>}
       </section>}
 
       {tab === "explore" && <section className="page-content">
@@ -532,7 +525,7 @@ export default function HomePage() {
           <select value={language} onChange={event => setLanguage(event.target.value)} aria-label="언어 필터"><option value="">모든 언어</option>{languages.map(item => <option key={item} value={item}>{item}</option>)}</select>
         </div>
         <div className="explore-summary"><span>{searchResults ? "GITHUB + SEMANTIC SEARCH RESULTS" : `ALGORITHM: ${exploreAlgo.toUpperCase()} · MODE: ${mode.toUpperCase()}`}</span><strong>{visibleExplore.length} projects</strong></div>
-        {visibleExplore.length ? <div className="explore-grid">{visibleExplore.map(repo => <RepoCard key={repo.id} repo={repo} compact onOpen={item => track(item, "click")} onDismiss={searchResults ? undefined : dismiss} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} />)}</div> : <div className="empty-state"><Icon name="explore" size={32} /><h3>일치하는 프로젝트가 없어요</h3><p>다른 검색어/카테고리를 선택하거나 GitHub 데이터를 동기화해보세요.</p></div>}
+        {visibleExplore.length ? <div className="explore-grid">{visibleExplore.map(repo => <RepoCard key={repo.id} repo={repo} compact onOpen={item => track(item, "click")} onDismiss={searchResults ? undefined : dismiss} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} onDetail={setDetailRepo} />)}</div> : <div className="empty-state"><Icon name="explore" size={32} /><h3>일치하는 프로젝트가 없어요</h3><p>다른 검색어/카테고리를 선택하거나 GitHub 데이터를 동기화해보세요.</p></div>}
         <p className="data-note">추천은 수집된 공개 GitHub 메타데이터, 내 Star·클릭 기록, pgvector 코사인 유사도(임베딩 활성화 시)를 결합하며 동일 소유자 편중을 최대 3개로 제한합니다. Trending은 다중 스냅샷이 있을 때만 Star 증가분을 반영합니다.</p>
       </section>}
 
@@ -548,7 +541,7 @@ export default function HomePage() {
           <div><strong>{user.sns_bookmarks ?? 0}</strong><span>SNS 북마크 (내부)</span></div>
         </div>
         <div className="section-title spaced"><div><span className="section-index">STARRED /</span><h2>관심 프로젝트</h2></div></div>
-        {starred.length ? <div className="home-grid">{starred.slice(0, 30).map(repo => <RepoCard key={repo.id} repo={repo} compact onOpen={item => track(item, "click")} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} />)}</div> : <div className="empty-state"><Icon name="star" size={32} /><h3>가져온 Star가 없어요</h3><p>동기화 상태와 GitHub App의 Starring 읽기 권한을 확인해주세요.</p></div>}
+        {starred.length ? <div className="home-grid">{starred.slice(0, 30).map(repo => <RepoCard key={repo.id} repo={repo} compact onOpen={item => track(item, "click")} onSummary={summarize} onTranslate={translateReadme} onBookmark={toggleRepoBookmark} onDetail={setDetailRepo} />)}</div> : <div className="empty-state"><Icon name="star" size={32} /><h3>가져온 Star가 없어요</h3><p>동기화 상태와 GitHub App의 Starring 읽기 권한을 확인해주세요.</p></div>}
 
         <div className="settings-panel">
           <h3>프로필 및 개인화 설정</h3>
@@ -627,6 +620,7 @@ export default function HomePage() {
       </section>}
     </main>
 
+    {detailRepo && <RepositoryDetailDialog key={detailRepo.id} repo={detailRepo} projects={owned} aiAvailable={aiStatus?.available ?? false} onClose={() => setDetailRepo(null)} />}
     {summaryLoading && <div className="modal-backdrop"><div className="summary-modal" role="status">실제 README를 읽고 로컬 Qwen3.5-4B (vLLM Metal) 추론을 수행하는 중...</div></div>}
     {aiModal && <div className="modal-backdrop" onClick={() => setAiModal(null)}><div className="summary-modal" role="dialog" aria-modal="true" aria-label={aiModal.title} onClick={event => event.stopPropagation()}><button className="modal-close" onClick={() => setAiModal(null)} aria-label="닫기"><Icon name="close" size={20} /></button><div className="eyebrow">{aiModal.subtitle}</div><h2>{aiModal.title}</h2><p>{aiModal.text}</p>{aiModal.truncated && <small>README가 길어 앞부분만 사용했습니다.</small>}{aiModal.latencyMs !== undefined && <small>추론 소요 시간: {aiModal.latencyMs} ms ({aiStatus?.model ?? "Qwen/Qwen3.5-4B"})</small>}<a href={aiModal.source} target="_blank" rel="noopener noreferrer">원본 README 확인 <Icon name="arrow" size={15} /></a></div></div>}
     {activeStory && <div className="modal-backdrop" onClick={() => setActiveStory(null)}><div className="summary-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}><button className="modal-close" onClick={() => setActiveStory(null)} aria-label="닫기"><Icon name="close" size={20} /></button><div className="eyebrow">24H DEVELOPER STORY · @{activeStory.author?.login}</div><h2>{activeStory.title}</h2><p>{activeStory.summary}</p><small>조회 {activeStory.view_count}회 · 만료 {relativeDate(activeStory.expires_at)}</small>{activeStory.source_url && <a href={activeStory.source_url} target="_blank" rel="noopener noreferrer">관련 링크 열기 <Icon name="arrow" size={15} /></a>}</div></div>}

@@ -31,6 +31,7 @@ from .recommend import (
     score_repository,
 )
 from .security import current_user, require_same_origin
+from .repository_details import repository_detail
 from .sync import embed_texts, enqueue_sync, get_valid_token, sync_repository_embeddings, upsert_repositories
 
 
@@ -174,6 +175,19 @@ async def my_repositories(
         .limit(100)
     )
     return {"items": [repo_json(repo) for repo in rows], "kind": kind}
+
+
+@router.get("/repositories/{repository_id}")
+async def get_repository_detail(repository_id: int, user: User = Depends(current_user), db: AsyncSession = Depends(session_scope)):
+    repo = await db.get(Repository, repository_id)
+    if not repo or not repo.is_public:
+        raise HTTPException(404, "Public repository not found")
+    try:
+        token = await get_valid_token(db, user.id)
+        async with GitHubClient(token) as github:
+            return await repository_detail(github, repo)
+    except GitHubError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @router.get("/explore")

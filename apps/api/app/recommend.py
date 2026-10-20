@@ -91,10 +91,12 @@ def score_repository(
     social_boost = 1.0 if (social_owner_logins and repo.owner_login.lower() in social_owner_logins) else 0.0
 
     reasons = [label for label in labels if interests[label] > 0][:3]
-    if social_boost > 0 and "following-author" not in reasons:
+    social_used = mode == "following" or (mode == "for-you" and semantic_similarity is not None)
+    if social_boost > 0 and social_used and "following-author" not in reasons:
         reasons.insert(0, "following-author")
 
     if mode == "trending":
+        reasons = (["github-popularity"] if repo.stars > 0 else []) + (["push-recency"] if repo.pushed_at else [])
         if growth > 0:
             score = popularity * 0.5 + growth * 0.25 + freshness * 0.25
             reasons = [f"+{star_delta} stars (snapshot)", *reasons][:3]

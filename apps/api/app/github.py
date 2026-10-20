@@ -7,7 +7,9 @@ from .config import settings
 
 
 class GitHubError(Exception):
-    pass
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def parse_time(value: str | None) -> datetime | None:
@@ -89,10 +91,13 @@ class GitHubClient:
                 await asyncio.sleep(2**attempt)
                 continue
             if response.status_code == 403 and response.headers.get("x-ratelimit-remaining") == "0":
-                raise GitHubError("GitHub API rate limit reached")
-            if response.status_code >= 400:
-                raise GitHubError(f"GitHub API returned {response.status_code}")
-            return response.json()
+                raise GitHubError("GitHub API rate limit reached", response.status_code)
+            if response.status_code >= 300:
+                raise GitHubError(f"GitHub API returned {response.status_code}", response.status_code)
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise GitHubError("GitHub returned invalid JSON") from exc
         raise GitHubError("GitHub request failed")
 
     async def pages(self, path: str, params: dict | None = None, max_pages: int = 10) -> list[dict]:

@@ -5,9 +5,66 @@
 > **중요 (인계 원칙):**
 > 1. 이 문서는 **코드 구현 상태**와 **실측·통합 검증 완료 상태**를 엄격히 분리하여 기록한다.
 > 2. 다음 작업자(또는 AI 에이전트)는 반드시 루트의 `PROJECT_SPEC.md`(원본 마스터 명세 1,727줄)와 이 문서를 먼저 읽고 이어서 진행한다.
-> 3. **현재 작업 재개에 따라 Docker Desktop과 Compose 서비스를 재기동했다.** 아래 3차 세션 기록이 이전의 프로세스 종료 기록보다 우선한다. 호스트 AI 서버는 이번 작업에서 재기동하지 않았다. 기존 모델 캐시와 가상환경은 삭제하거나 변경하지 않았다.
+> 3. **최신 상태: 사용자 요청에 따라 모든 프로젝트 컨테이너와 Docker Desktop을 종료했다(2026-10-20).** AI 서버도 꺼져 있다. DB/Redis 볼륨, 모델 캐시와 가상환경은 보존했다. 재시작·종료 명령은 `RUNBOOK.md`를 따른다. 아래 개발 중 기동 기록은 과거 기록이다.
 
-## 현재 인계: 3차 세션 (2026-10-20)
+## 현재 인계: 4차 세션 — GitTeol 참고 보완 (2026-10-20)
+
+### 요청·근거와 선택한 작업
+
+- 사용자가 과거 프로젝트 `https://github.com/SeungMin2001/GitTeol`을 참고해 추가할 기능을 보완하도록 요청했다. 시작 커밋은 `e49f1c9` (`10/20 2`). 시작 시 기존 `DEVELOPMENT_STATUS.md` 수정과 미추적 `RUNBOOK.md`가 있었으며 보존했다.
+- GitHub 연결 도구로 GitTeol의 트리·설계 문서·저장소 상세 UI·활용 제안·추천 엔진·활동 타임라인·분석·이미지 처리·번역 코드를 읽었다. 분석 기준 커밋은 `e60bcaa92f786b09bb893222c4d5d1c3a4d5ef89`.
+- 현재 제품에서 빠진 저장소 상세, 내 프로젝트별 활용 제안, 추천 이유를 사용자가 이해할 수 있는 표시를 우선 반영했다. 비교 표, 정확한 소스 링크, 보류 항목과 API 계약은 **`docs/GITTEOL_REVIEW.md`**에 있다.
+- GitTeol의 코드·MySQL 덤프·사용자 데이터·이미지·설정 파일을 현재 서비스로 복제하지 않았다. 기존 README는 Expo 기본 템플릿이어서 설명 문서만 믿지 않고 실제 소스를 함께 확인했다.
+
+### 변경 파일과 동작
+
+| 파일 | 변경 내용 |
+|---|---|
+| `apps/api/app/repository_details.py` | GitHub에서 공개 여부와 고유 ID 재검증, 언어별 bytes/비율·라이선스·README·출처·확인 시각 조회. README 없음/오류를 구분하고 언어/README의 선택 섹션 실패는 별도로 표시. README는 엄격한 Base64 검사 및 최대 길이 제한. |
+| `apps/api/app/api.py` | 로그인 필요 `GET /api/repositories/{repository_id}` 추가. |
+| `apps/api/app/ai.py` | 로그인/Origin 검사 `POST /api/ai/usage-suggestion` 추가. 내 저장소의 소유 관계·DB GitHub ID·현재 GitHub 소유자 ID를 검사하고 두 저장소의 실제 메타데이터와 README를 사용. 응답에 양쪽 출처/잘림/모델/검토 필요 여부 포함. 기존 요약·번역도 공유 공개 여부 확인 경로를 사용. 게시물 초안은 README 없음(422) 외의 API/공개 여부 오류를 숨기지 않도록 수정. |
+| `apps/api/app/github.py` | `GitHubError.status_code` 보존으로 404(없음)와 장애 구분. 예상하지 않은 리디렉션과 잘못된 JSON을 오류로 처리. |
+| `apps/api/app/recommend.py`, `tests/test_recommend.py` | Trending에는 실제 Star·푸시 시점·스냅샷 신호만 이유로 표시하고, 소셜 점수가 없는 메타데이터 fallback에서는 팔로잉을 순위 이유로 주장하지 않도록 수정 및 회귀 테스트 추가. 점수 가중치는 변경하지 않음. |
+| `apps/web/components/RepositoryDetailDialog.tsx` | 별도 native dialog 상세 컴포넌트. 실제 저장소 정보·원문, 추천 이유, 내 공개 프로젝트 선택 및 AI 활용 제안. Esc/닫기·요청 취소·빈 상태·API/AI 오류 표시. README는 HTML로 실행하지 않음. |
+| `apps/web/lib/api.ts`, `app/page.tsx`, `app/globals.css` | 공통 API 클라이언트 분리, Home/Explore/Profile 저장소 카드에 상세 보기 연결, 반응형 상세 스타일. |
+| `apps/api/tests/test_repository_details.py` | 새 테스트 12개(매개변수 테스트 포함). 재공개 여부·ID 불일치·손상/누락 README·언어 비율·HTTP 상태·로그인 필요·소유권·양쪽 자료·AI 장애·같은 저장소 비교 거절·초안 API 오류 은폐 방지. DB fixture는 롤백하고 GitHub/LLM 대역은 단위 테스트에만 사용. |
+| `docs/GITTEOL_REVIEW.md` | 참고 분석, 적용/보류 이유, 새 API 계약, 비용·프라이버시·캐시·페이지네이션 등 다음 단계 기록. |
+
+### 이번 검증과 제약
+
+1. `git diff --check`, Python `compileall`: 통과.
+2. `docker compose build --quiet api web`: 성공. Next.js 프로덕션 빌드 포함.
+3. `docker compose run --rm --no-deps -T web npm run typecheck`: 통과.
+4. 최신 소스를 읽기 전용 마운트한 `pytest -q -p no:cacheprovider`: **25 passed, 1 warning in 0.39s**. 기존 AnyIO/Starlette deprecation 경고 1개가 남아 있다.
+   이후 추천 이유 정확성 테스트를 추가하고 최종 API·웹 이미지를 다시 빌드했다. 최종 `docker compose run --rm --no-deps -T api pytest -q`: **26 passed, 1 warning in 0.39s**. TypeScript에 영향을 주는 최종 문구는 프로덕션 빌드의 타입 검사를 통과했다. 테스트 후 DB 합성 사용자 잔류 수는 **0**.
+5. 새 `repository_detail()` 서비스로 **실제 공개 GitTeol API**를 익명 조회했다. 저장소 ID `1064009794`, README available(776자), 언어 조회 성공: JavaScript 253,340 bytes(56.8%), Python 192,910 bytes(43.2%). 이 값은 당시 응답의 관측이며 고정 제품 데이터로 저장하지 않았다. 확인 시각 `2026-10-20T04:16:50.822429+00:00`.
+6. 위 5번은 실제 공개 API 자료와 서비스 파싱 검증이다. **인증된 상세 API의 브라우저 E2E·실제 GitHub 로그인·실제 두 저장소 간 Qwen 활용 제안은 미검증**이다. `.env`의 GitHub App 자격증명은 여전히 사용자 설정이 필요하다. AI 서버는 이번 세션에서 실행하지 않았다.
+7. 검증을 위해 Docker를 일시 기동할 때 엔진이 `_ping` HTTP 500으로 실패했다. `docker desktop restart --timeout 45`로 정상 복구한 뒤 DB/Redis/migrate와 일회성 테스트 컨테이너만 사용했다. 초기 AppleScript 종료 요청의 성공만으로 엔진 프로세스까지 종료됐다고 단정하면 안 된다. 최종 정리 결과는 아래에 추가한다.
+
+### 검증 후 프로세스 정리
+
+- `docker compose down`: 성공. DB/Redis/migrate 컨테이너 및 프로젝트 네트워크 제거, 영속 볼륨 유지.
+- `docker ps`와 `docker compose ps --all`: 실행 컨테이너와 프로젝트 컨테이너 없음.
+- `docker desktop stop --timeout 45`: 성공. 이후 OS 프로세스 목록에서 `com.docker.backend`와 Docker Desktop 실행 프로세스가 없음을 확인했다. `docker desktop status`는 종료 상태에서 응답하지 않아 중단했으며 종료 확인에는 OS 프로세스 검사를 사용했다. 모델 서버는 이번 작업에서 기동하지 않았다. `RUNBOOK.md`에 CLI 정상 종료와 HTTP 500 복구 명령을 보완했다.
+
+### 다음 AI가 이어갈 순서
+
+1. 사용자가 GitHub App Client ID/Secret을 `.env`에 직접 설정한 뒤 실제 로그인 및 저장소 동기화를 검증한다.
+2. 카드의 **상세 보기 → 내 프로젝트 선택 → 활용 방안 제안**을 실제 로그인/로컬 모델로 검증한다. 권한 없는 프로젝트, 공개→비공개 변경, README 없음, AI 중지 상태도 확인한다. 공개 API 파싱과 실계정 E2E를 구분한다.
+3. 새 상세 조회(최대 3 GitHub 요청)와 비교 제안(최대 4 요청)에 ETag 캐시·호출 제한 추가. AI 캐시는 두 README SHA+모델+프롬프트 버전으로 구분해야 한다.
+4. GitTeol에서 참고한 cursor 목록/검색·프로필 북마크 모음·동의 기반 활동 기록을 다음 확장 후보로 검토한다. 현재 내 저장소 선택 목록은 API 상한 100개다. 자동 이미지 다운로드/S3 복제나 LLM 관심사 예측은 권한·동의·비용·평가 전까지 보류한다.
+5. 3차 세션의 DM 읽음 갱신 분리·대화방 동시 생성·마이그레이션 불변성·전체 차단 정책 검토는 여전히 미해결이다. 추가 UI 구현이 기존 문제를 해결한 것으로 간주하지 않는다.
+6. 원래 `PROJECT_SPEC.md`는 유지했다. 새 상세 분석은 보완 문서이며 제품 전체 완료를 뜻하지 않는다. 이번 변경을 커밋·push하지 않았다.
+
+## 이전 인계: 3차 세션 (2026-10-20)
+
+### 세션 종료 후 사용자 요청: 전체 프로세스 중지
+
+- `docker compose down` 성공. web/api/worker/db/redis 및 완료된 migrate 컨테이너와 프로젝트 네트워크 제거. 데이터 볼륨은 제거하지 않음.
+- `docker compose ps --all`: 컨테이너 없음. `docker ps`: 다른 실행 컨테이너도 없음 확인.
+- localhost 3000/5432/8000/8001/8002 LISTEN 없음 확인. 호스트 AI 서버는 이미 꺼져 있어 추가 종료 대상이 없었음.
+- 실행 중인 다른 컨테이너가 없음을 확인한 후 AppleScript로 Docker Desktop 종료 요청 성공.
+- `RUNBOOK.md`에 Docker 기본 서비스와 선택 AI 서버별 시작 명령, health check, 종료, 환경 변수/코드 변경 반영법 작성. 다음 AI는 명시적 사용자 작업 재개 전 서비스가 실행 중이라고 가정하지 않는다.
 
 ### 시작점과 이번 작업의 선택 이유
 
@@ -93,7 +150,7 @@
 | 항목 | 상태 / 경로 |
 |---|---|
 | 하드웨어 / OS | Apple M4 (10-core), RAM 24 GB, macOS 26.6.2 (arm64) |
-| Docker / Compose | Engine 29.8.2, Compose v5.6.0 (3차 세션에서 재기동, DB/Redis 볼륨 보존) |
+| Docker / Compose | Engine 29.8.2, Compose v5.6.0 (3차 세션 검증 후 사용자 요청으로 전체 종료, DB/Redis 볼륨 보존) |
 | 로컬 AI 가상환경 | `/Users/shin/.venv-vllm-metal` (Python 3.12.15, `vllm 0.31.0+cpu`, `vllm-metal 0.31.0`, `torch 2.13.0`, `transformers 5.17.0`) |
 | 다운로드된 모델 캐시 | `/Users/shin/.cache/huggingface/hub` 내 `models--Qwen--Qwen3.5-4B` 및 `models--Qwen--Qwen3-Embedding-0.6B` 다운로드 완료 |
 | 환경 변수 (`.env`) | `POSTGRES_*`, `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `AI_BASE_URL`, `EMBEDDING_BASE_URL`, `EMBEDDING_DIMENSIONS=1024` 설정 완료. **`GITHUB_CLIENT_ID`와 `GITHUB_CLIENT_SECRET`만 비어 있음.** |

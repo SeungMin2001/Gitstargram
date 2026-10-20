@@ -1,5 +1,7 @@
 # Gitstargram
 
+저장소 카드의 **상세 보기**에서 GitHub 실시간 메타데이터·언어별 코드 비율·라이선스·README·추천 신호를 확인할 수 있습니다. 내 공개 프로젝트를 선택하면 양쪽 실제 자료를 근거로 로컬 AI에 활용 방안을 요청합니다. 이 흐름의 실제 GitHub 로그인·모델 통합 검증은 아직 필요합니다. 이전 GitTeol 프로젝트를 참고한 결정은 [보완 분석](docs/GITTEOL_REVIEW.md), 프로세스 실행·종료 명령은 [RUNBOOK.md](RUNBOOK.md)에 있습니다.
+
 실제 GitHub 데이터를 기반으로 한 개발자 SNS입니다. GitHub App 사용자 OAuth(PKCE), 공개 저장소·Star·스냅샷 동기화, 24시간 스토리, 개발 게시물 및 댓글·북마크, `Qwen/Qwen3-Embedding-0.6B`(pgvector 1024차원) 기반 하이브리드 추천, `Qwen/Qwen3.5-4B`(vLLM Metal) 기반 README 요약·번역·게시물 초안 생성, 그리고 PostgreSQL + WebSocket 기반 1:1 DM을 포함합니다.
 
 전체 요구사항은 [PROJECT_SPEC.md](PROJECT_SPEC.md), 현재 코드 구현 범위와 실측 벤치마크·미검증 항목(실계정 자격증명 대기 항목)은 [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md)에 분리되어 기록되어 있습니다.

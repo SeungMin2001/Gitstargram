@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+.repo-detail-dialog { width: min(850px, calc(100vw - 28px)); max-height: 88dvh; padding: 0; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); color: var(--text); margin: auto; overflow-y: auto; }
+.repo-detail-dialog::backdrop { background: #030a0bd9; backdrop-filter: blur(5px); }
+.repo-detail-body { position: relative; padding: 32px; }
+.repo-detail-body h2 { margin: 12px 26px 18px 0; font-size: clamp(21px, 4vw, 32px); overflow-wrap: anywhere; }
+.repo-detail-body p, .repo-detail-body li { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.repo-detail-body a:not(.outline-button) { color: var(--accent); }
+.detail-metrics { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; margin: 20px 0; }
+.detail-metrics b { margin-left: 6px; }
+.detail-section { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--line); }
+.detail-section h3 { font-size: 17px; margin: 0 0 10px; }
+.detail-section ul { list-style: disc; padding-left: 20px; }
+.detail-meta { color: var(--muted); font-size: 12px !important; }
+.detail-warning { color: #dba35e; font-size: 12px !important; }
+.detail-error { color: #e9958c; }
+.language-list { list-style: none !important; padding: 0 !important; }
+.language-list li { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.language-list small { color: var(--muted); margin-left: auto; }
+.usage-controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.usage-controls select { flex: 1; min-width: 0; max-width: 100%; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
+.usage-result { padding: 16px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.usage-result p { white-space: pre-wrap; }
+.usage-result small { color: var(--muted); }
+.readme-source { padding: 16px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow-y: auto; font-size: 12px; line-height: 1.7; }
+@media (max-width: 520px) { .repo-detail-body { padding: 24px 18px; } .usage-controls { flex-direction: column; } }
+
 :root { color-scheme: dark; --bg: #0b1014; --panel: #111a20; --panel-2: #162127; --line: #26343c; --text: #eef5f2; --muted: #9baaa9; --accent: #b5f765; --accent-2: #70d9b0; --sidebar-bg: #0c1317; }
 [data-theme="light"] { color-scheme: light; --bg: #f4f7f5; --panel: #ffffff; --panel-2: #edf2ee; --line: #d4e0d9; --text: #101b16; --muted: #52665d; --accent: #2c7a3f; --accent-2: #1f634c; --sidebar-bg: #ebf0ec; }
 * { box-sizing: border-box; }
